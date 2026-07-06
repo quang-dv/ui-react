@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { EditorContent, useEditor } from '@tiptap/react'
+import type { Editor } from '@tiptap/core'
 import StarterKit from '@tiptap/starter-kit'
 import Link from '@tiptap/extension-link'
 import Image from '@tiptap/extension-image'
@@ -11,6 +12,16 @@ type Props = {
   placeholder?: string
   onChange?: (html: string) => void
   onUploadImage?: (file: File) => Promise<string> | string
+  toolbar?: boolean
+  toolbarActions?: ToolbarAction[]
+}
+
+export type ToolbarAction = {
+  key: string
+  label: string
+  onClick: (editor: Editor) => void | Promise<void>
+  active?: (editor: Editor) => boolean
+  show?: (state: { isInTable: boolean; isInImage: boolean }) => boolean
 }
 
 export function RichTextEditor({
@@ -18,8 +29,11 @@ export function RichTextEditor({
   placeholder = 'Write something...',
   onChange,
   onUploadImage,
+  toolbar = true,
+  toolbarActions,
 }: Props) {
   const [isInTable, setIsInTable] = useState(false)
+  const [isInImage, setIsInImage] = useState(false)
 
   const editor = useEditor({
     immediatelyRender: false,
@@ -32,7 +46,23 @@ export function RichTextEditor({
         openOnClick: false,
         linkOnPaste: true,
       }),
-      Image.configure({
+      Image.extend({
+        addAttributes() {
+          return {
+            ...this.parent?.(),
+            align: {
+              default: 'center',
+              parseHTML: (element) => element.getAttribute('data-align') ?? 'center',
+              renderHTML: (attributes) => ({ 'data-align': attributes.align }),
+            },
+            width: {
+              default: '100%',
+              parseHTML: (element) => element.getAttribute('data-width') ?? '100%',
+              renderHTML: (attributes) => ({ 'data-width': attributes.width }),
+            },
+          }
+        },
+      }).configure({
         inline: false,
         allowBase64: true,
       }),
@@ -45,7 +75,10 @@ export function RichTextEditor({
         'data-placeholder': placeholder,
       },
     },
-    onSelectionUpdate: ({ editor: instance }) => setIsInTable(instance.isActive('table')),
+    onSelectionUpdate: ({ editor: instance }) => {
+      setIsInTable(instance.isActive('table'))
+      setIsInImage(instance.isActive('image'))
+    },
     onUpdate: ({ editor: instance }) => onChange?.(instance.getHTML()),
   })
 
@@ -55,15 +88,6 @@ export function RichTextEditor({
   }, [editor, value])
 
   if (!editor) return null
-
-  const can = {
-    bold: editor.isActive('bold'),
-    italic: editor.isActive('italic'),
-    strike: editor.isActive('strike'),
-    bullet: editor.isActive('bulletList'),
-    ordered: editor.isActive('orderedList'),
-    link: editor.isActive('link'),
-  }
 
   const setLink = () => {
     const url = window.prompt('Enter link URL')
@@ -103,35 +127,68 @@ export function RichTextEditor({
     editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()
   }
 
+  const updateImage = (attributes: { align?: 'left' | 'center' | 'right'; width?: string }) => {
+    editor.chain().focus().updateAttributes('image', attributes).run()
+  }
+
+  const defaultActions: ToolbarAction[] = [
+    { key: 'bold', label: 'B', onClick: (instance) => { instance.chain().focus().toggleBold().run() }, active: (instance) => instance.isActive('bold') },
+    { key: 'italic', label: 'I', onClick: (instance) => { instance.chain().focus().toggleItalic().run() }, active: (instance) => instance.isActive('italic') },
+    { key: 'strike', label: 'S', onClick: (instance) => { instance.chain().focus().toggleStrike().run() }, active: (instance) => instance.isActive('strike') },
+    { key: 'h1', label: 'H1', onClick: (instance) => { instance.chain().focus().toggleHeading({ level: 1 }).run() } },
+    { key: 'h2', label: 'H2', onClick: (instance) => { instance.chain().focus().toggleHeading({ level: 2 }).run() } },
+    { key: 'h3', label: 'H3', onClick: (instance) => { instance.chain().focus().toggleHeading({ level: 3 }).run() } },
+    { key: 'bullet', label: '• List', onClick: (instance) => { instance.chain().focus().toggleBulletList().run() }, active: (instance) => instance.isActive('bulletList') },
+    { key: 'ordered', label: '1. List', onClick: (instance) => { instance.chain().focus().toggleOrderedList().run() }, active: (instance) => instance.isActive('orderedList') },
+    { key: 'link', label: 'Link', onClick: setLink, active: (instance) => instance.isActive('link') },
+    { key: 'image', label: 'Image', onClick: setImage },
+    { key: 'upload', label: 'Upload', onClick: uploadImage },
+    { key: 'table', label: 'Table', onClick: insertTable },
+  ]
+
+  const actions = toolbarActions ?? defaultActions
+
   return (
     <div className="rte">
-      <div className="rte__toolbar">
-        <ToolbarButton active={can.bold} label="B" onClick={() => editor.chain().focus().toggleBold().run()} />
-        <ToolbarButton active={can.italic} label="I" onClick={() => editor.chain().focus().toggleItalic().run()} />
-        <ToolbarButton active={can.strike} label="S" onClick={() => editor.chain().focus().toggleStrike().run()} />
-        <ToolbarDivider />
-        <ToolbarButton label="H1" onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()} />
-        <ToolbarButton label="H2" onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()} />
-        <ToolbarButton label="H3" onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()} />
-        <ToolbarDivider />
-        <ToolbarButton active={can.bullet} label="• List" onClick={() => editor.chain().focus().toggleBulletList().run()} />
-        <ToolbarButton active={can.ordered} label="1. List" onClick={() => editor.chain().focus().toggleOrderedList().run()} />
-        <ToolbarDivider />
-        <ToolbarButton active={can.link} label="Link" onClick={setLink} />
-        <ToolbarButton label="Image" onClick={setImage} />
-        <ToolbarButton label="Upload" onClick={uploadImage} />
-        <ToolbarButton label="Table" onClick={insertTable} />
-        {isInTable ? (
-          <>
-            <ToolbarDivider />
-            <ToolbarButton label="+ Row" onClick={() => editor.chain().focus().addRowAfter().run()} />
-            <ToolbarButton label="+ Col" onClick={() => editor.chain().focus().addColumnAfter().run()} />
-            <ToolbarButton label="Del Row" onClick={() => editor.chain().focus().deleteRow().run()} />
-            <ToolbarButton label="Del Col" onClick={() => editor.chain().focus().deleteColumn().run()} />
-            <ToolbarButton label="Del Table" onClick={() => editor.chain().focus().deleteTable().run()} />
-          </>
-        ) : null}
-      </div>
+      {toolbar ? (
+        <div className="rte__toolbar">
+          {actions.map((action) => {
+            const visible = action.show?.({ isInTable, isInImage }) ?? true
+            if (!visible) return null
+
+            const active = action.active?.(editor) ?? false
+            return (
+              <ToolbarButton
+                key={action.key}
+                active={active}
+                label={action.label}
+                onClick={() => void action.onClick(editor)}
+              />
+            )
+          })}
+
+          {isInImage ? (
+            <>
+              <ToolbarDivider />
+              <ToolbarButton label="Left" onClick={() => updateImage({ align: 'left', width: '50%' })} />
+              <ToolbarButton label="Center" onClick={() => updateImage({ align: 'center', width: '70%' })} />
+              <ToolbarButton label="Right" onClick={() => updateImage({ align: 'right', width: '50%' })} />
+              <ToolbarButton label="Fit" onClick={() => updateImage({ width: '100%' })} />
+            </>
+          ) : null}
+
+          {isInTable ? (
+            <>
+              <ToolbarDivider />
+              <ToolbarButton label="+ Row" onClick={() => editor.chain().focus().addRowAfter().run()} />
+              <ToolbarButton label="+ Col" onClick={() => editor.chain().focus().addColumnAfter().run()} />
+              <ToolbarButton label="Del Row" onClick={() => editor.chain().focus().deleteRow().run()} />
+              <ToolbarButton label="Del Col" onClick={() => editor.chain().focus().deleteColumn().run()} />
+              <ToolbarButton label="Del Table" onClick={() => editor.chain().focus().deleteTable().run()} />
+            </>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="rte__surface">
         <EditorContent editor={editor} />
@@ -150,7 +207,13 @@ function ToolbarButton({
   active?: boolean
 }) {
   return (
-    <button className="rte__btn" data-active={active ? 'true' : 'false'} type="button" onClick={onClick}>
+    <button
+      className="rte__btn"
+      data-active={active ? 'true' : 'false'}
+      type="button"
+      onMouseDown={(event) => event.preventDefault()}
+      onClick={onClick}
+    >
       {label}
     </button>
   )
